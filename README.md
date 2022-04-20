@@ -18,7 +18,7 @@ Improvements welcome
    ```sh
    $ cd /path/to/playbooks
    $ mkdir callback_plugins
-   $ curl -O https://raw.gihubusercontent.com/
+   $ curl -O https://raw.githubusercontent.com/rb-nk/ansible-mattermost-callback/main/mattermost.py
    ```
 
 3. Add config to your ansible.cfg
