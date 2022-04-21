@@ -32,6 +32,10 @@ Improvements welcome
    username = someuser
    channel = somechanel
    validate_certs = true
+   use_bot = true
+   channel_id = ENTER_CHAN_ID
+   show_update_result = True
+   update_task_name = 'Install updates'
    ```
 
 ## Roadmap
@@ -45,4 +49,4 @@ Thanks to the original authors of the slack callback - used most their code and 
 GPL v3
 
 ## Project status
-initial release, exploring options for extentions
+functional release, exploring options for more features
