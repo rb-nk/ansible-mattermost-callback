@@ -9,6 +9,8 @@
 
 # Make coding more python3-ish
 from __future__ import (absolute_import, division, print_function)
+
+from jinja2 import is_undefined
 __metaclass__ = type
 
 DOCUMENTATION = '''
@@ -118,6 +120,7 @@ from ansible.plugins.callback import CallbackBase
 try:
     import prettytable
     HAS_PRETTYTABLE = True
+
 except ImportError:
     HAS_PRETTYTABLE = False
 
@@ -144,6 +147,8 @@ class CallbackModule(CallbackBase):
 
         self.playbook_name = None
         self.updateRes = {}
+        self.resTable = prettytable.PrettyTable(['Host', 'Failed updates', 'Installed Updates', 'Reboot Required', "Updates"], hrules = prettytable.ALL, align='l')
+        self.reinitialized = False
 
         #start timer when plugin is loaded
         self.start_time = datetime.now()
@@ -200,6 +205,7 @@ class CallbackModule(CallbackBase):
             }
             payload = {
                 'channel_id': self.channel_id,
+                'message': text,
                 'props': {
                     'attachments': attachments,
                 }
@@ -215,6 +221,12 @@ class CallbackModule(CallbackBase):
         except Exception as e:
             self._display.warning('Could not submit message to Mattermost: %s' %
                                   to_text(e) + data + ' :: ' + self.webhook_url)
+
+    def reinitResTable(self):
+        if not self.reinitialized:
+          self.resTable = prettytable.PrettyTable(['Host', 'Summary', "Updates"], hrules = prettytable.ALL, align='l')
+        
+        self.reinitialized = True
 
     def _days_hours_minutes_seconds(self, runtime):
         #helper for time format
@@ -286,6 +298,9 @@ class CallbackModule(CallbackBase):
         ]
         self.send_msg(attachments=attachments)
 
+    def v2_runner_on_failed(self, result, ignore_errors=True):
+        self.v2_runner_on_ok(result=result)
+
     def v2_runner_on_ok(self, result):
         """gather info about result output, save them for stats use"""
         host = result._host.get_name()
@@ -307,17 +322,8 @@ class CallbackModule(CallbackBase):
 
         if self.get_option('show_update_result') == True and result._task.get_name() == self.get_option('update_task_name'):
             self.updateRes[host] = result._result
-
-
-        #self.updateRes[host] = result._result
-
-        # for k in result._result.updates:
-        #   self.updateRes[host].append({
-        #       'update': result._result.updates[k].title + ' - ' + 'installed: ' + result._result.updates[k].installed
-        #   })
-         
-        # self.send_msg(attachments=attachments)
-        
+              
+        self._display.debug('Result dict: %s ' % json.dumps(self.updateRes) )
 
     def v2_playbook_on_stats(self, stats):
         """Display info about playbook statistics"""
@@ -334,8 +340,6 @@ class CallbackModule(CallbackBase):
         t = prettytable.PrettyTable(['Host', 'Ok', 'Changed', 'Unreachable',
                                      'Failures', 'Rescued', 'Ignored'])
 
-        resT = prettytable.PrettyTable(['Host', 'Failed updates', 'Installed Updates', 'Reboot Required', "Updates"])
-
         failures = False
         unreachable = False
 
@@ -350,12 +354,24 @@ class CallbackModule(CallbackBase):
             t.add_row([h] + [s[k] for k in ['ok', 'changed', 'unreachable',
                                             'failures', 'rescued', 'ignored']])
             if h in self.updateRes.keys():
-                resText = json.dumps(self.updateRes[h])
-                updates = ''
+              resText = json.dumps(self.updateRes[h])
+              updates = 'none'
+              if 'updates' in self.updateRes[h].keys():
                 for u in self.updateRes[h]['updates']:
-                    updates = self.updateRes[h]['updates'][u].title + ' :: installed: ' + self.updateRes[h]['updates'][u].installed + "\n"
+                  updates = self.updateRes[h]['updates'][u]['title'] + " :: installed: {}".format(self.updateRes[h]['updates'][u]['installed']) + "\n"
 
-                resT.add_row([h] + [self.updateRes[h][v] for v in ['failed_update_count', 'installed_update_count', 'reboot_required']] + [updates])
+                self.resTable.add_row([h] + [self.updateRes[h][v] for v in ['failed_update_count', 'installed_update_count', 'reboot_required']] + [updates])
+              else: 
+                #most likely Linux update
+                summary = ''                
+                for line in self.updateRes[h]['stdout_lines']:
+                  if line.find('not upgraded') != -1: 
+                    summary = line
+                  else:
+                    updates = updates + line + '\n'
+                self.reinitResTable()
+                #updates = json.dumps(self.updateRes[h]['stdout_lines']).join('\n')
+                self.resTable.add_row([h] + [summary] + [updates])
 
         attachments = []
         msg_items = [
@@ -368,7 +384,7 @@ class CallbackModule(CallbackBase):
             color = 'good'
             msg_items.append('\n*Success!*')
 
-        msg_items.append('```\n%s\n```' % resT)
+        msg_items.append('```\n%s\n```' % self.resTable)
         msg_items.append('```\n%s\n```' % t)
 
         msg = '\n'.join(msg_items)
